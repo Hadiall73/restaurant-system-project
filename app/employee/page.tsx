@@ -152,51 +152,201 @@ export default function EmployeePage() {
     setAbrMonth(d.toISOString().slice(0, 7));
   }
 
-  function exportAbrechnungCSV() {
+  async function exportAbrechnungPDF() {
+    const { default: jsPDF } = await import("jspdf");
     const [y, m] = abrMonth.split("-").map(Number);
     const monthName = new Date(y, m - 1, 1).toLocaleDateString("de-DE", { month: "long", year: "numeric" });
-    const completedShifts = abrShifts.filter(s => s.actual_end);
-    const rows = [
-      [`Monatsabrechnung`, monthName, profile?.name || ""],
-      [`Restaurant`, restaurant?.name || ""],
-      [],
-      ["Datum", "Wochentag", "Von", "Bis", "Stunden", "Stundenlohn", "Betrag"],
-      ...completedShifts.map(s => {
-        const start = new Date(s.actual_start || s.start_time);
-        const end = new Date(s.actual_end);
-        const h = (end.getTime() - start.getTime()) / 3600000;
-        const wage = Number(s.hourly_wage || 13);
-        return [
-          start.toLocaleDateString("de-DE"),
-          start.toLocaleDateString("de-DE", { weekday: "long" }),
-          start.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }),
-          end.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }),
-          h.toFixed(2),
-          wage.toFixed(2) + " €",
-          (h * wage).toFixed(2) + " €",
-        ];
-      }),
-      [],
-      ["Gesamt", "", "", "",
-        completedShifts.reduce((s, sh) => {
-          const h = sh.actual_end ? (new Date(sh.actual_end).getTime() - new Date(sh.actual_start || sh.start_time).getTime()) / 3600000 : 0;
-          return s + h;
-        }, 0).toFixed(2),
-        "",
-        completedShifts.reduce((s, sh) => {
-          const h = sh.actual_end ? (new Date(sh.actual_end).getTime() - new Date(sh.actual_start || sh.start_time).getTime()) / 3600000 : 0;
-          return s + h * Number(sh.hourly_wage || 13);
-        }, 0).toFixed(2) + " €",
-      ],
+    const completed = abrShifts.filter(s => s.actual_end);
+    const totalH = completed.reduce((s, sh) => s + (new Date(sh.actual_end).getTime() - new Date(sh.actual_start || sh.start_time).getTime()) / 3600000, 0);
+    const totalEur = completed.reduce((s, sh) => {
+      const h = (new Date(sh.actual_end).getTime() - new Date(sh.actual_start || sh.start_time).getTime()) / 3600000;
+      return s + h * Number(sh.hourly_wage || 13);
+    }, 0);
+    const avgWage = completed.length > 0 ? completed.reduce((s, sh) => s + Number(sh.hourly_wage || 13), 0) / completed.length : 13;
+
+    const doc = new jsPDF({ unit: "mm", format: "a4" });
+    const W = 210;
+    const gray = (v: number): [number, number, number] => [v, v, v];
+
+    // ── Orange header bar ────────────────────────────────────────────────
+    doc.setFillColor(249, 115, 22);
+    doc.rect(0, 0, W, 28, "F");
+
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(18);
+    doc.setFont("helvetica", "bold");
+    doc.text("LOHNABRECHNUNG", 14, 12);
+
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Abrechnungszeitraum: ${monthName}`, 14, 20);
+    doc.text(`Erstellt am: ${new Date().toLocaleDateString("de-DE")}`, W - 14, 20, { align: "right" });
+
+    // ── Arbeitgeber / Arbeitnehmer Boxen ────────────────────────────────
+    doc.setTextColor(...gray(30));
+    const boxY = 36;
+
+    // Arbeitgeber Box
+    doc.setFillColor(249, 250, 251);
+    doc.roundedRect(14, boxY, 85, 34, 3, 3, "F");
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(249, 115, 22);
+    doc.text("ARBEITGEBER", 19, boxY + 7);
+    doc.setTextColor(...gray(30));
+    doc.setFontSize(11);
+    doc.setFont("helvetica", "bold");
+    doc.text(restaurant?.name || "Restaurant", 19, boxY + 15);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(...gray(100));
+    doc.text("Gastronomie", 19, boxY + 22);
+
+    // Arbeitnehmer Box
+    doc.setFillColor(249, 250, 251);
+    doc.roundedRect(111, boxY, 85, 34, 3, 3, "F");
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(249, 115, 22);
+    doc.text("ARBEITNEHMER", 116, boxY + 7);
+    doc.setTextColor(...gray(30));
+    doc.setFontSize(11);
+    doc.setFont("helvetica", "bold");
+    doc.text(profile?.name || "Mitarbeiter", 116, boxY + 15);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(...gray(100));
+    const memberInfo = abrShifts[0] ? `${avgWage.toFixed(2)} €/Std.` : "Stundenlohn";
+    doc.text(memberInfo, 116, boxY + 22);
+    doc.text(`Periode: ${monthName}`, 116, boxY + 29);
+
+    // ── Trennlinie ───────────────────────────────────────────────────────
+    const tableY = boxY + 44;
+    doc.setDrawColor(229, 231, 235);
+    doc.setLineWidth(0.3);
+    doc.line(14, tableY - 4, W - 14, tableY - 4);
+
+    // ── Tabelle Header ───────────────────────────────────────────────────
+    doc.setFillColor(31, 41, 55);
+    doc.rect(14, tableY, W - 28, 8, "F");
+
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    const cols = [
+      { label: "Nr.", x: 17 },
+      { label: "Datum", x: 27 },
+      { label: "Wochentag", x: 60 },
+      { label: "Von", x: 98 },
+      { label: "Bis", x: 116 },
+      { label: "Stunden", x: 134 },
+      { label: "Std.-Lohn", x: 155 },
+      { label: "Betrag", x: W - 17, align: "right" as const },
     ];
-    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(";")).join("\n");
-    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `Abrechnung_${profile?.name?.replace(/\s+/g, "_")}_${abrMonth}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    cols.forEach(c => doc.text(c.label, c.x, tableY + 5.5, { align: c.align || "left" }));
+
+    // ── Tabellenzeilen ───────────────────────────────────────────────────
+    let curY = tableY + 8;
+    completed.forEach((s, i) => {
+      const start = new Date(s.actual_start || s.start_time);
+      const end = new Date(s.actual_end);
+      const h = (end.getTime() - start.getTime()) / 3600000;
+      const wage = Number(s.hourly_wage || 13);
+      const earned = h * wage;
+
+      if (i % 2 === 0) {
+        doc.setFillColor(249, 250, 251);
+        doc.rect(14, curY, W - 28, 7, "F");
+      }
+
+      doc.setTextColor(...gray(30));
+      doc.setFontSize(8.5);
+      doc.setFont("helvetica", "normal");
+      doc.text(String(i + 1).padStart(2, "0"), 17, curY + 5);
+      doc.text(start.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" }), 27, curY + 5);
+      doc.text(start.toLocaleDateString("de-DE", { weekday: "long" }), 60, curY + 5);
+      doc.text(start.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }), 98, curY + 5);
+      doc.text(end.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }), 116, curY + 5);
+      doc.text(h.toFixed(2) + " h", 134, curY + 5);
+      doc.text(wage.toFixed(2) + " €", 155, curY + 5);
+      doc.setFont("helvetica", "bold");
+      doc.text(earned.toFixed(2) + " €", W - 17, curY + 5, { align: "right" });
+      doc.setFont("helvetica", "normal");
+
+      // Zeilentrennlinie
+      doc.setDrawColor(229, 231, 235);
+      doc.setLineWidth(0.1);
+      doc.line(14, curY + 7, W - 14, curY + 7);
+      curY += 7;
+    });
+
+    // ── Summenzeile ──────────────────────────────────────────────────────
+    curY += 2;
+    doc.setFillColor(31, 41, 55);
+    doc.rect(14, curY, W - 28, 10, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.text("GESAMT", 17, curY + 7);
+    doc.text(`${completed.length} Schichten`, 60, curY + 7);
+    doc.text(`${totalH.toFixed(2)} h`, 134, curY + 7);
+    doc.setTextColor(251, 191, 36);
+    doc.setFontSize(10);
+    doc.text(`${totalEur.toFixed(2)} €`, W - 17, curY + 7, { align: "right" });
+
+    // ── Netto-Info Box ───────────────────────────────────────────────────
+    curY += 18;
+    doc.setFillColor(254, 247, 237);
+    doc.roundedRect(14, curY, W - 28, 22, 3, 3, "F");
+    doc.setDrawColor(249, 115, 22);
+    doc.setLineWidth(0.5);
+    doc.line(14, curY, 14, curY + 22);
+
+    doc.setTextColor(249, 115, 22);
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.text("ABRECHNUNGSÜBERSICHT", 19, curY + 7);
+    doc.setTextColor(...gray(30));
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Gearbeitete Stunden:`, 19, curY + 14);
+    doc.setFont("helvetica", "bold");
+    doc.text(`${totalH.toFixed(2)} Stunden`, 75, curY + 14);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Ø Stundenlohn:`, 110, curY + 14);
+    doc.setFont("helvetica", "bold");
+    doc.text(`${avgWage.toFixed(2)} €`, 150, curY + 14);
+
+    doc.setFont("helvetica", "normal");
+    doc.text(`Bruttolohn ${monthName}:`, 19, curY + 20);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(22, 163, 74);
+    doc.setFontSize(11);
+    doc.text(`${totalEur.toFixed(2)} EUR`, 75, curY + 20);
+
+    // ── Unterschriftenfeld ───────────────────────────────────────────────
+    curY += 34;
+    doc.setTextColor(...gray(150));
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "normal");
+    doc.setDrawColor(...gray(180));
+    doc.setLineWidth(0.3);
+
+    doc.line(14, curY + 10, 85, curY + 10);
+    doc.text("Datum, Unterschrift Arbeitgeber", 14, curY + 15);
+
+    doc.line(120, curY + 10, W - 14, curY + 10);
+    doc.text("Datum, Unterschrift Arbeitnehmer", 120, curY + 15);
+
+    // ── Footer ───────────────────────────────────────────────────────────
+    doc.setFillColor(31, 41, 55);
+    doc.rect(0, 282, W, 15, "F");
+    doc.setTextColor(...gray(150));
+    doc.setFontSize(7);
+    doc.text(`${restaurant?.name || "Restaurant"} · Lohnabrechnung ${monthName} · ${profile?.name || ""}`, W / 2, 290, { align: "center" });
+
+    doc.save(`Lohnabrechnung_${profile?.name?.replace(/\s+/g, "_")}_${abrMonth}.pdf`);
+    toast.success("PDF wird heruntergeladen!");
   }
 
   async function logout() {
@@ -373,9 +523,9 @@ export default function EmployeePage() {
                     <h3 className="font-semibold text-white">Abgeleistete Schichten</h3>
                   </div>
                   {completed.length > 0 && (
-                    <button onClick={exportAbrechnungCSV}
-                      className="flex items-center gap-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white px-3 py-1.5 rounded-xl text-xs font-medium transition-colors">
-                      <Download size={12} /> CSV
+                    <button onClick={exportAbrechnungPDF}
+                      className="flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white px-3 py-1.5 rounded-xl text-xs font-medium transition-colors">
+                      <Download size={12} /> PDF
                     </button>
                   )}
                 </div>
@@ -458,7 +608,7 @@ export default function EmployeePage() {
               {/* Hinweis */}
               <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4">
                 <p className="text-blue-300 text-xs font-medium mb-1">Hinweis</p>
-                <p className="text-gray-400 text-xs">Die CSV-Datei enthält alle abgeleisteten Schichten und kann als Nachweis eingereicht werden. Der Stundenlohn wird vom Chef in deinem Profil hinterlegt.</p>
+                <p className="text-gray-400 text-xs">Das PDF enthält eine professionelle Lohnabrechnung mit allen Schichten, Stunden und Gesamtlohn — geeignet für Steuerberater, Behörden oder als persönlicher Nachweis.</p>
               </div>
             </div>
           );
