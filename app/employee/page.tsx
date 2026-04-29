@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useStore } from "@/lib/store";
 import { useRouter } from "next/navigation";
-import { Clock, Euro, Calendar, CheckCircle, LogOut, ChefHat } from "lucide-react";
+import { Clock, Euro, Calendar, CheckCircle, LogOut, ChefHat, FileText, Download, ChevronLeft, ChevronRight } from "lucide-react";
 import toast from "react-hot-toast";
 import { Toaster } from "react-hot-toast";
 
@@ -27,7 +27,9 @@ export default function EmployeePage() {
   const [totalEarned, setTotalEarned] = useState(0);
   const [availability, setAvailability] = useState<Record<string, boolean>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
-  const [tab, setTab] = useState<"dashboard" | "availability" | "schedule">("dashboard");
+  const [tab, setTab] = useState<"dashboard" | "availability" | "schedule" | "abrechnung">("dashboard");
+  const [abrMonth, setAbrMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [abrShifts, setAbrShifts] = useState<any[]>([]);
   const [inviteCode, setInviteCode] = useState("");
   const [joining, setJoining] = useState(false);
   const [hoursWorked, setHoursWorked] = useState(0);
@@ -124,6 +126,79 @@ export default function EmployeePage() {
     if (!error) toast.success("Verfügbarkeit eingereicht!"); else toast.error("Fehler");
   }
 
+  async function loadAbrechnung(month: string) {
+    if (!profile || !restaurant) return;
+    const [y, m] = month.split("-").map(Number);
+    const start = new Date(y, m - 1, 1).toISOString();
+    const end = new Date(y, m, 0, 23, 59, 59).toISOString();
+    const { data } = await supabase
+      .from("shifts")
+      .select("*")
+      .eq("restaurant_id", restaurant.id)
+      .eq("user_id", profile.id)
+      .gte("start_time", start)
+      .lte("start_time", end)
+      .order("start_time", { ascending: true });
+    setAbrShifts(data || []);
+  }
+
+  useEffect(() => {
+    if (tab === "abrechnung" && profile && restaurant) loadAbrechnung(abrMonth);
+  }, [tab, abrMonth, profile, restaurant]);
+
+  function changeMonth(dir: 1 | -1) {
+    const [y, m] = abrMonth.split("-").map(Number);
+    const d = new Date(y, m - 1 + dir, 1);
+    setAbrMonth(d.toISOString().slice(0, 7));
+  }
+
+  function exportAbrechnungCSV() {
+    const [y, m] = abrMonth.split("-").map(Number);
+    const monthName = new Date(y, m - 1, 1).toLocaleDateString("de-DE", { month: "long", year: "numeric" });
+    const completedShifts = abrShifts.filter(s => s.actual_end);
+    const rows = [
+      [`Monatsabrechnung`, monthName, profile?.name || ""],
+      [`Restaurant`, restaurant?.name || ""],
+      [],
+      ["Datum", "Wochentag", "Von", "Bis", "Stunden", "Stundenlohn", "Betrag"],
+      ...completedShifts.map(s => {
+        const start = new Date(s.actual_start || s.start_time);
+        const end = new Date(s.actual_end);
+        const h = (end.getTime() - start.getTime()) / 3600000;
+        const wage = Number(s.hourly_wage || 13);
+        return [
+          start.toLocaleDateString("de-DE"),
+          start.toLocaleDateString("de-DE", { weekday: "long" }),
+          start.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }),
+          end.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }),
+          h.toFixed(2),
+          wage.toFixed(2) + " €",
+          (h * wage).toFixed(2) + " €",
+        ];
+      }),
+      [],
+      ["Gesamt", "", "", "",
+        completedShifts.reduce((s, sh) => {
+          const h = sh.actual_end ? (new Date(sh.actual_end).getTime() - new Date(sh.actual_start || sh.start_time).getTime()) / 3600000 : 0;
+          return s + h;
+        }, 0).toFixed(2),
+        "",
+        completedShifts.reduce((s, sh) => {
+          const h = sh.actual_end ? (new Date(sh.actual_end).getTime() - new Date(sh.actual_start || sh.start_time).getTime()) / 3600000 : 0;
+          return s + h * Number(sh.hourly_wage || 13);
+        }, 0).toFixed(2) + " €",
+      ],
+    ];
+    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(";")).join("\n");
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Abrechnung_${profile?.name?.replace(/\s+/g, "_")}_${abrMonth}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function logout() {
     await supabase.auth.signOut();
     clear();
@@ -182,10 +257,10 @@ export default function EmployeePage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2 px-4 mt-4">
-        {([["dashboard", "Übersicht"], ["schedule", "Dienstplan"], ["availability", "Verfügbarkeit"]] as const).map(([k, l]) => (
+      <div className="flex gap-2 px-4 mt-4 overflow-x-auto pb-1">
+        {([["dashboard", "Übersicht"], ["schedule", "Dienstplan"], ["availability", "Verfügbarkeit"], ["abrechnung", "Abrechnung"]] as const).map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)}
-            className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-all ${tab === k ? "bg-orange-500 text-white" : "bg-gray-800 text-gray-400"}`}>{l}</button>
+            className={`flex-shrink-0 flex-1 py-2.5 rounded-xl text-sm font-medium transition-all ${tab === k ? "bg-orange-500 text-white" : "bg-gray-800 text-gray-400"}`}>{l}</button>
         ))}
       </div>
 
@@ -244,6 +319,150 @@ export default function EmployeePage() {
             </div>
           </div>
         )}
+
+        {tab === "abrechnung" && (() => {
+          const [y, m] = abrMonth.split("-").map(Number);
+          const monthName = new Date(y, m - 1, 1).toLocaleDateString("de-DE", { month: "long", year: "numeric" });
+          const completed = abrShifts.filter(s => s.actual_end);
+          const planned = abrShifts.filter(s => !s.actual_end);
+          const totalH = completed.reduce((s, sh) => {
+            return s + (new Date(sh.actual_end).getTime() - new Date(sh.actual_start || sh.start_time).getTime()) / 3600000;
+          }, 0);
+          const totalEur = completed.reduce((s, sh) => {
+            const h = (new Date(sh.actual_end).getTime() - new Date(sh.actual_start || sh.start_time).getTime()) / 3600000;
+            return s + h * Number(sh.hourly_wage || 13);
+          }, 0);
+
+          return (
+            <div className="space-y-4">
+              {/* Header: Monatsnavigation */}
+              <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 flex items-center justify-between">
+                <button onClick={() => changeMonth(-1)} className="p-2 rounded-xl bg-gray-800 hover:bg-gray-700 text-white transition-colors">
+                  <ChevronLeft size={16} />
+                </button>
+                <div className="text-center">
+                  <p className="text-white font-bold text-lg">{monthName}</p>
+                  <p className="text-gray-400 text-xs">Monatliche Lohnabrechnung</p>
+                </div>
+                <button onClick={() => changeMonth(1)} disabled={abrMonth >= new Date().toISOString().slice(0, 7)}
+                  className="p-2 rounded-xl bg-gray-800 hover:bg-gray-700 text-white transition-colors disabled:opacity-30">
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+
+              {/* KPIs */}
+              <div className="grid grid-cols-3 gap-3">
+                {[
+                  { label: "Schichten", value: String(completed.length), icon: Calendar, color: "text-blue-400" },
+                  { label: "Stunden", value: `${totalH.toFixed(1)}h`, icon: Clock, color: "text-orange-400" },
+                  { label: "Verdient", value: `${totalEur.toFixed(2)} €`, icon: Euro, color: "text-green-400" },
+                ].map(k => (
+                  <div key={k.label} className="bg-gray-900 border border-gray-800 rounded-2xl p-4 text-center">
+                    <k.icon size={20} className={`${k.color} mx-auto mb-1`} />
+                    <p className="text-white font-bold text-lg">{k.value}</p>
+                    <p className="text-gray-500 text-xs">{k.label}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Schichten-Tabelle */}
+              <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+                <div className="p-4 border-b border-gray-800 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <FileText size={16} className="text-orange-400" />
+                    <h3 className="font-semibold text-white">Abgeleistete Schichten</h3>
+                  </div>
+                  {completed.length > 0 && (
+                    <button onClick={exportAbrechnungCSV}
+                      className="flex items-center gap-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white px-3 py-1.5 rounded-xl text-xs font-medium transition-colors">
+                      <Download size={12} /> CSV
+                    </button>
+                  )}
+                </div>
+
+                {completed.length === 0 ? (
+                  <div className="p-8 text-center">
+                    <FileText size={32} className="text-gray-700 mx-auto mb-3" />
+                    <p className="text-gray-500 text-sm">Keine abgeschlossenen Schichten</p>
+                    <p className="text-gray-600 text-xs mt-1">in {monthName}</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="divide-y divide-gray-800/50">
+                      {completed.map((s, i) => {
+                        const start = new Date(s.actual_start || s.start_time);
+                        const end = new Date(s.actual_end);
+                        const h = (end.getTime() - start.getTime()) / 3600000;
+                        const wage = Number(s.hourly_wage || 13);
+                        const earned = h * wage;
+                        return (
+                          <div key={s.id} className="px-4 py-3 flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-xl bg-gray-800 flex items-center justify-center shrink-0">
+                              <span className="text-gray-400 text-xs font-bold">{String(i + 1).padStart(2, "0")}</span>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-white text-sm font-medium">
+                                {start.toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "short" })}
+                              </p>
+                              <p className="text-gray-400 text-xs">
+                                {start.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })} – {end.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}
+                                {" · "}{wage.toFixed(2)} €/h
+                              </p>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className="text-white text-sm font-semibold">{earned.toFixed(2)} €</p>
+                              <p className="text-gray-500 text-xs">{h.toFixed(1)} Std.</p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Summe */}
+                    <div className="border-t border-gray-700 bg-gray-800/50 px-4 py-3 flex items-center justify-between">
+                      <div>
+                        <p className="text-white font-semibold text-sm">Gesamt {monthName}</p>
+                        <p className="text-gray-400 text-xs">{completed.length} Schichten · {totalH.toFixed(1)} Stunden</p>
+                      </div>
+                      <p className="text-green-400 font-bold text-xl">{totalEur.toFixed(2)} €</p>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Geplante Schichten */}
+              {planned.length > 0 && (
+                <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+                  <div className="p-4 border-b border-gray-800 flex items-center gap-2">
+                    <Calendar size={16} className="text-orange-400" />
+                    <h3 className="font-semibold text-white">Noch ausstehend ({planned.length})</h3>
+                  </div>
+                  <div className="divide-y divide-gray-800/50">
+                    {planned.map(s => (
+                      <div key={s.id} className="px-4 py-3 flex items-center justify-between">
+                        <div>
+                          <p className="text-gray-300 text-sm">
+                            {new Date(s.start_time).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "short" })}
+                          </p>
+                          <p className="text-gray-500 text-xs">
+                            {new Date(s.start_time).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })} – {new Date(s.end_time).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}
+                          </p>
+                        </div>
+                        <span className="text-xs px-2 py-1 rounded-full bg-orange-500/20 text-orange-400">Geplant</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Hinweis */}
+              <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4">
+                <p className="text-blue-300 text-xs font-medium mb-1">Hinweis</p>
+                <p className="text-gray-400 text-xs">Die CSV-Datei enthält alle abgeleisteten Schichten und kann als Nachweis eingereicht werden. Der Stundenlohn wird vom Chef in deinem Profil hinterlegt.</p>
+              </div>
+            </div>
+          );
+        })()}
 
         {tab === "availability" && (
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
