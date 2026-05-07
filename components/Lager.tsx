@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { supabase, RobustSync } from "@/lib/supabase";
 import { useStore } from "@/lib/store";
 import {
   AlertTriangle, CheckCircle, ShoppingCart, Zap, Phone, Mail,
@@ -310,17 +310,26 @@ export default function Lager() {
   }
 
   async function toggleAuto(item: InventoryItem) {
-    const { error } = await supabase.from("inventory").update({ auto_order: !item.auto_order }).eq("id", item.id);
-    if (!error) {
+    try {
+      const { error } = await supabase.from("inventory").update({ auto_order: !item.auto_order }).eq("id", item.id);
+      if (!error) {
+        setItems(prev => prev.map(i => i.id === item.id ? { ...i, auto_order: !i.auto_order } : i));
+        toast.success(item.auto_order ? "Auto-Bestellung deaktiviert" : "Auto-Bestellung aktiviert");
+      } else {
+        throw error;
+      }
+    } catch (e) {
+      console.log("Offline: Updating auto-order status locally...");
+      await RobustSync.saveLocally('inventory', { id: item.id, auto_order: !item.auto_order });
       setItems(prev => prev.map(i => i.id === item.id ? { ...i, auto_order: !i.auto_order } : i));
-      toast.success(item.auto_order ? "Auto-Bestellung deaktiviert" : "Auto-Bestellung aktiviert");
+      toast("Offline: Status lokal gespeichert!", { icon: "☁️" });
     }
   }
 
   async function bestellen(item: InventoryItem, art: "manuell" | "auto") {
     if (!restaurant) return;
     setOrderingId(item.id);
-    const { error } = await supabase.from("supplier_orders").insert({
+    const payload = {
       restaurant_id: restaurant.id,
       supplier_id: item.supplier_id,
       inventory_id: item.id,
@@ -330,10 +339,23 @@ export default function Lager() {
       total_price: (item.order_quantity || item.minimum_quantity) * (item.price_per_unit || 0),
       order_type: art,
       status: "bestellt",
-    });
-    setOrderingId(null);
-    if (!error) { toast.success(`${item.name} wurde bestellt!`); load(); }
-    else toast.error("Fehler bei der Bestellung");
+    };
+
+    try {
+      const { error } = await supabase.from("supplier_orders").insert(payload);
+      if (!error) {
+        toast.success(`${item.name} wurde bestellt!`);
+        load();
+      } else {
+        throw error;
+      }
+    } catch (e) {
+      console.log("Offline: Queueing order locally...");
+      await RobustSync.saveLocally('sales', payload); // Using sales/orders queue
+      toast("Offline: Bestellung lokal gespeichert!", { icon: "☁️" });
+    } finally {
+      setOrderingId(null);
+    }
   }
 
   async function addSupplier() {
