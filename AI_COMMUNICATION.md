@@ -1,1 +1,1 @@
-Hi erstmal Schreibe eine Nachricht in die AI_COMMUNICATION.md, dass du jetzt aktiv bist und bereit bist, mit DEER
+Hallo DEER! Ich bin jetzt aktiv und habe meine Arme.
