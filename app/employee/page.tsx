@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { supabase, RobustSync } from "@/lib/supabase";
 import { useStore } from "@/lib/store";
 import { useRouter } from "next/navigation";
 import { Clock, Euro, Calendar, CheckCircle, LogOut, ChefHat, FileText, Download, ChevronLeft, ChevronRight, MessageSquare } from "lucide-react";
@@ -146,16 +146,56 @@ export default function EmployeePage() {
   async function clockIn() {
     if (!profile || !restaurant) return;
     const today = new Date().toISOString().slice(0, 10);
-    const { data: shift } = await supabase.from("shifts").select("*").eq("restaurant_id", restaurant.id).eq("user_id", profile.id).gte("start_time", today).lte("start_time", today + "T23:59:59").single();
-    if (!shift) { toast.error("Keine Schicht für heute geplant"); return; }
-    const { error } = await supabase.from("shifts").update({ is_clocked_in: true, actual_start: new Date().toISOString() }).eq("id", shift.id);
-    if (!error) { toast.success("Eingestempelt!"); setCurrentShift({ ...shift, is_clocked_in: true, actual_start: new Date().toISOString() }); }
+    
+    try {
+      const { data: shift } = await supabase.from("shifts").select("*").eq("restaurant_id", restaurant.id).eq("user_id", profile.id).gte("start_time", today).lte("start_time", today + "T23:59:59").single();
+      if (!shift) { toast.error("Keine Schicht für heute geplant"); return; }
+      
+      const { error } = await supabase.from("shifts").update({ is_clocked_in: true, actual_start: new Date().toISOString() }).eq("id", shift.id);
+      
+      if (!error) { 
+        toast.success("Eingestempelt!"); 
+        setCurrentShift({ ...shift, is_clocked_in: true, actual_start: new Date().toISOString() }); 
+      } else {
+        throw error;
+      }
+    } catch (e) {
+      console.log("Clock-in failed, saving locally...");
+      const todayShift = { 
+        user_id: profile.id, 
+        restaurant_id: restaurant.id, 
+        is_clocked_in: true, 
+        actual_start: new Date().toISOString(), 
+        type: 'CLOCK_IN' 
+      };
+      await RobustSync.saveLocally('shifts', todayShift);
+      toast("Offline: Einstempelzeit wurde lokal gespeichert!", { icon: "☁️" });
+      setCurrentShift({ ...profile, is_clocked_in: true, actual_start: new Date().toISOString() });
+    }
   }
 
   async function clockOut() {
     if (!currentShift) return;
-    const { error } = await supabase.from("shifts").update({ is_clocked_in: false, actual_end: new Date().toISOString() }).eq("id", currentShift.id);
-    if (!error) { toast.success("Ausgestempelt!"); setCurrentShift(null); loadEmployeeData(); }
+    try {
+      const { error } = await supabase.from("shifts").update({ is_clocked_in: false, actual_end: new Date().toISOString() }).eq("id", currentShift.id);
+      if (!error) { 
+        toast.success("Ausgestempelt!"); 
+        setCurrentShift(null); 
+        loadEmployeeData(); 
+      } else {
+        throw error;
+      }
+    } catch (e) {
+      console.log("Clock-out failed, saving locally...");
+      await RobustSync.saveLocally('shifts', { 
+        id: currentShift.id, 
+        is_clocked_in: false, 
+        actual_end: new Date().toISOString(), 
+        type: 'CLOCK_OUT' 
+      });
+      toast("Offline: Ausstempelzeit lokal gespeichert!", { icon: "☁️" });
+      setCurrentShift(null);
+    }
   }
 
   async function joinRestaurant() {
@@ -173,8 +213,15 @@ export default function EmployeePage() {
     const weekStart = getMonday(1).toISOString().slice(0, 10);
     const payload: Record<string, any> = { restaurant_id: restaurant.id, user_id: profile.id, week_start: weekStart };
     DAY_KEYS.forEach(d => { payload[d] = !!availability[d]; payload[`${d}_note`] = notes[d] || null; });
-    const { error } = await supabase.from("availability").upsert(payload, { onConflict: "restaurant_id,user_id,week_start" });
-    if (!error) toast.success("Verfügbarkeit eingereicht!"); else toast.error("Fehler");
+    
+    try {
+      const { error } = await supabase.from("availability").upsert(payload, { onConflict: "restaurant_id,user_id,week_start" });
+      if (!error) toast.success("Verfügbarkeit eingereicht!"); else throw error;
+    } catch (e) {
+      console.log("Availability submit failed, saving locally...");
+      await RobustSync.saveLocally('availability', payload);
+      toast("Offline: Verfügbarkeit lokal gespeichert!", { icon: "☁️" });
+    }
   }
 
   async function loadAbrechnung(month: string) {
