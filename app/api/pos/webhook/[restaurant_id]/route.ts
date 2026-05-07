@@ -9,16 +9,16 @@ function getAdmin() {
 function parseSale(provider: string, body: any): { amount: number; tip: number; payment_method: string; table_number?: number } | null {
   try {
     switch (provider) {
-      case "sumup":
+      case "sumup": {
         if (body.event_type !== "PAYMENT" && body.event_type !== "transaction.completed") return null;
         const sp = body.payload || body;
         return {
-          amount: Number(sp.amount || sp.local_amount || 0),
-          tip: Number(sp.tip_amount || 0),
+          amount: Number(sp.amount || sp.local_amount || 0) / 100,
+          tip: Number(sp.tip_amount || 0) / 100,
           payment_method: sp.payment_type || "card",
         };
-
-      case "square":
+      }
+      case "square": {
         const sqPay = body.data?.object?.payment || body.payment;
         if (!sqPay || sqPay.status !== "COMPLETED") return null;
         return {
@@ -26,8 +26,8 @@ function parseSale(provider: string, body: any): { amount: number; tip: number; 
           tip: Number(sqPay.tip_money?.amount || 0) / 100,
           payment_method: sqPay.source_type?.toLowerCase() || "card",
         };
-
-      case "lightspeed":
+      }
+      case "lightspeed": {
         const ls = body.sale || body;
         return {
           amount: Number(ls.total || ls.totalIncl || 0),
@@ -35,8 +35,8 @@ function parseSale(provider: string, body: any): { amount: number; tip: number; 
           payment_method: ls.paymentType || "card",
           table_number: ls.tableId ? Number(ls.tableId) : undefined,
         };
-
-      case "orderbird":
+      }
+      case "orderbird": {
         const ob = body.order || body;
         return {
           amount: Number(ob.total_gross || ob.amount || 0),
@@ -44,31 +44,32 @@ function parseSale(provider: string, body: any): { amount: number; tip: number; 
           payment_method: ob.payment_method || "card",
           table_number: ob.table_number ? Number(ob.table_number) : undefined,
         };
-
-      case "gastrofix":
+      }
+      case "gastrofix": {
         return {
           amount: Number(body.total || body.amount || 0),
           tip: Number(body.gratuity || 0),
           payment_method: body.paymentType || "card",
           table_number: body.tableNo ? Number(body.tableNo) : undefined,
         };
-
-      case "zettle":
+      }
+      case "zettle": {
         const zt = body.payload || body;
         return {
           amount: Number(zt.amount || 0) / 100,
           tip: 0,
           payment_method: zt.paymentType?.toLowerCase() || "card",
         };
-
+      }
       case "generic":
-      default:
+      default: {
         return {
           amount: Number(body.amount || body.total || body.price || 0),
           tip: Number(body.tip || body.gratuity || 0),
           payment_method: body.payment_method || body.paymentType || "card",
           table_number: body.table_number || body.table || undefined,
         };
+      }
     }
   } catch {
     return null;

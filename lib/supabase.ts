@@ -42,6 +42,13 @@ export interface Restaurant {
   invite_code: string;
   license_key: string;
   owner_id: string;
+  email?: string;
+  is_active?: boolean;
+  is_paid?: boolean;
+  trial_ends_at?: string | null;
+  stripe_customer_id?: string | null;
+  stripe_sub_id?: string | null;
+  created_at?: string;
 }
 
 export interface RestaurantMember {

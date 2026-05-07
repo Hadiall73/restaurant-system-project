@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useStore } from "@/lib/store";
 import { supabase } from "@/lib/supabase";
-import { Copy, CheckCircle, Plug, Trash2, RefreshCw, Wifi, WifiOff, Zap, Clock, Euro, ChevronDown, ChevronUp } from "lucide-react";
+import { Copy, CheckCircle, Plug, Trash2, RefreshCw, Wifi, WifiOff, Zap, Clock, Euro, ChevronDown, ChevronUp, Download, Terminal } from "lucide-react";
 import toast from "react-hot-toast";
 
 const PROVIDERS = [
@@ -67,6 +67,18 @@ const PROVIDERS = [
     ],
   },
   {
+    id: "gastroware", name: "Gastroware", color: "bg-red-600", textColor: "text-red-400",
+    bridge: true,
+    steps: [
+      "Node.js installieren: nodejs.org (einmalig)",
+      'Ordner erstellen: C:\\GastrowareBridge\\',
+      "Bridge-Skript herunterladen und dort speichern",
+      "CMD öffnen → cd C:\\GastrowareBridge → npm install mysql2",
+      "Webhook-URL & Datenbankdaten im Skript eintragen",
+      "node gastroware-bridge.js → fertig, Echtzeit-Sync läuft",
+    ],
+  },
+  {
     id: "generic", name: "Andere / Custom", color: "bg-gray-500", textColor: "text-gray-300",
     steps: [
       "Öffne die Einstellungen deines Kassensystems",
@@ -103,6 +115,7 @@ export default function PosConnect() {
   const [testingId, setTestingId] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [recentSales, setRecentSales] = useState<RecentSale[]>([]);
+  const [liveConnected, setLiveConnected] = useState(false);
   const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
 
   useEffect(() => {
@@ -112,6 +125,7 @@ export default function PosConnect() {
     }
   }, [restaurant]);
 
+  // Supabase Realtime + Polling-Fallback alle 5s
   useEffect(() => {
     if (!restaurant?.id) return;
 
@@ -126,9 +140,17 @@ export default function PosConnect() {
         setRecentSales(prev => [payload.new as RecentSale, ...prev].slice(0, 20));
         loadConnections();
       })
-      .subscribe();
+      .subscribe((status) => {
+        setLiveConnected(status === "SUBSCRIBED");
+      });
 
-    return () => { supabase.removeChannel(channel); };
+    // Polling-Fallback: alle 5 Sekunden aktualisieren
+    const poll = setInterval(() => loadRecentSales(), 5000);
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(poll);
+    };
   }, [restaurant]);
 
   async function loadConnections() {
@@ -207,9 +229,19 @@ export default function PosConnect() {
 
   return (
     <div className="space-y-6 p-1">
-      <div>
-        <h2 className="text-2xl font-bold text-white">Kassensystem verbinden</h2>
-        <p className="text-gray-400 text-sm mt-1">Verbinde deine Kasse — Umsätze werden automatisch erfasst</p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-white">Kassensystem verbinden</h2>
+          <p className="text-gray-400 text-sm mt-1">Verbinde deine Kasse — Umsätze fließen automatisch in Echtzeit</p>
+        </div>
+        <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold border shrink-0 ${
+          liveConnected
+            ? "bg-green-500/10 border-green-500/30 text-green-400"
+            : "bg-gray-800 border-gray-700 text-gray-500"
+        }`}>
+          <span className={`w-2 h-2 rounded-full ${liveConnected ? "bg-green-400 animate-pulse" : "bg-gray-600"}`} />
+          {liveConnected ? "LIVE verbunden" : "Verbinde..."}
+        </div>
       </div>
 
       {/* How it works */}
@@ -320,9 +352,27 @@ export default function PosConnect() {
               {/* Expanded: Webhook URL + Steps */}
               {isExpanded && (
                 <div className="border-t border-gray-800 p-5 space-y-4">
+
+                  {/* Gastroware: Bridge-Banner */}
+                  {(prov as any)?.bridge && (
+                    <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 flex items-start gap-3">
+                      <Terminal size={18} className="text-red-400 shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-red-300 text-sm font-semibold mb-1">Gastroware Bridge — Echtzeit über lokales Skript</p>
+                        <p className="text-gray-400 text-xs mb-3">Das Skript läuft auf deinem Kassen-PC und sendet jeden Verkauf sofort an die App (2-3 Sek. Verzögerung).</p>
+                        <a href="/gastroware-bridge.js" download="gastroware-bridge.js"
+                          className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-xs font-semibold transition-colors">
+                          <Download size={13} /> Bridge-Skript herunterladen
+                        </a>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Webhook URL */}
                   <div>
-                    <p className="text-gray-400 text-xs mb-2 font-medium">Schritt 2 — Diese URL in dein Kassensystem eintragen:</p>
+                    <p className="text-gray-400 text-xs mb-2 font-medium">
+                      {(prov as any)?.bridge ? "Schritt 5 — Diese URL ins Bridge-Skript eintragen (webhookUrl):" : "Schritt 2 — Diese URL in dein Kassensystem eintragen:"}
+                    </p>
                     <div className="flex items-center gap-2 bg-gray-800 rounded-xl px-3 py-2.5">
                       <code className="text-orange-400 text-xs flex-1 truncate">{webhookUrl}</code>
                       <button onClick={() => copyWebhook(conn)}

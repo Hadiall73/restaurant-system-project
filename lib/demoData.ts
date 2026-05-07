@@ -16,11 +16,11 @@ export const umsatzMonat = [
 ];
 
 export const mitarbeiter = [
-  { id: 1, name: "Anna Müller", rolle: "Köchin", stunden: 40, lohn: 16 },
-  { id: 2, name: "Ben Schmidt", rolle: "Kellner", stunden: 32, lohn: 13 },
-  { id: 3, name: "Clara Weber", rolle: "Kellnerin", stunden: 28, lohn: 13 },
-  { id: 4, name: "David Koch", rolle: "Spüler", stunden: 20, lohn: 12 },
-  { id: 5, name: "Eva Lang", rolle: "Köchin", stunden: 40, lohn: 15 },
+  { id: 1, name: "Anna Müller",  rolle: "Köchin",    stunden: 36, sollStunden: 40, lohn: 16 },
+  { id: 2, name: "Ben Schmidt",  rolle: "Kellner",   stunden: 32, sollStunden: 32, lohn: 13 },
+  { id: 3, name: "Clara Weber",  rolle: "Kellnerin", stunden: 21, sollStunden: 28, lohn: 13 },
+  { id: 4, name: "David Koch",   rolle: "Spüler",    stunden: 20, sollStunden: 20, lohn: 12 },
+  { id: 5, name: "Eva Lang",     rolle: "Köchin",    stunden: 40, sollStunden: 40, lohn: 15 },
 ];
 
 export const dienstplan = [
@@ -31,15 +31,102 @@ export const dienstplan = [
   { mitarbeiter: "Eva Lang", mo: "09-17", di: "-", mi: "09-17", do: "09-17", fr: "09-20", sa: "09-22", so: "10-18" },
 ];
 
+export const lieferanten = [
+  {
+    id: "L1",
+    name: "Metzger Hoffmann",
+    kontakt: "Hans Hoffmann",
+    telefon: "05251 / 12 34 56",
+    email: "bestellung@metzger-hoffmann.de",
+    kategorie: "Fleisch & Geflügel",
+    lieferzeit: "1 Tag",
+    mindestbestellwert: 80,
+    zahlungsziel: 14,
+  },
+  {
+    id: "L2",
+    name: "Gemüse Meyer",
+    kontakt: "Maria Meyer",
+    telefon: "05251 / 98 76 54",
+    email: "info@gemuese-meyer.de",
+    kategorie: "Obst & Gemüse",
+    lieferzeit: "Täglich",
+    mindestbestellwert: 30,
+    zahlungsziel: 7,
+  },
+  {
+    id: "L3",
+    name: "Feinkost Bauer",
+    kontakt: "Klaus Bauer",
+    telefon: "0521 / 44 55 66",
+    email: "order@feinkost-bauer.de",
+    kategorie: "Feinkost & Öle",
+    lieferzeit: "2 Tage",
+    mindestbestellwert: 50,
+    zahlungsziel: 30,
+  },
+  {
+    id: "L4",
+    name: "Bäckerei Zulieferer",
+    kontakt: "Thomas Becker",
+    telefon: "05251 / 33 22 11",
+    email: "lieferung@baeckerei-zul.de",
+    kategorie: "Backwaren & Mehl",
+    lieferzeit: "Täglich",
+    mindestbestellwert: 20,
+    zahlungsziel: 7,
+  },
+  {
+    id: "L5",
+    name: "Fisch Seidel",
+    kontakt: "Peter Seidel",
+    telefon: "040 / 77 88 99",
+    email: "bestellung@fisch-seidel.de",
+    kategorie: "Fisch & Meeresfrüchte",
+    lieferzeit: "1 Tag",
+    mindestbestellwert: 100,
+    zahlungsziel: 14,
+  },
+  {
+    id: "L6",
+    name: "Weinhaus Stein",
+    kontakt: "Renate Stein",
+    telefon: "06131 / 55 44 33",
+    email: "order@weinhaus-stein.de",
+    kategorie: "Getränke & Wein",
+    lieferzeit: "3 Tage",
+    mindestbestellwert: 150,
+    zahlungsziel: 30,
+  },
+  {
+    id: "L7",
+    name: "Molkerei Nord",
+    kontakt: "Jens Nordmann",
+    telefon: "0431 / 11 22 33",
+    email: "info@molkerei-nord.de",
+    kategorie: "Milchprodukte",
+    lieferzeit: "Täglich",
+    mindestbestellwert: 25,
+    zahlungsziel: 7,
+  },
+];
+
 export const lagerbestand = [
-  { artikel: "Rindfleisch", menge: 8, einheit: "kg", minimum: 10, preis: 18.5, lieferant: "Metzger Hoffmann" },
-  { artikel: "Kartoffeln", menge: 45, einheit: "kg", minimum: 20, preis: 0.8, lieferant: "Gemüse Meyer" },
-  { artikel: "Olivenöl", menge: 3, einheit: "L", minimum: 5, preis: 8.9, lieferant: "Feinkost Bauer" },
-  { artikel: "Mehl", menge: 22, einheit: "kg", minimum: 10, preis: 0.6, lieferant: "Bäckerei Zulieferer" },
-  { artikel: "Tomaten", menge: 12, einheit: "kg", minimum: 8, preis: 2.1, lieferant: "Gemüse Meyer" },
-  { artikel: "Lachs", menge: 4, einheit: "kg", minimum: 6, preis: 22.0, lieferant: "Fisch Seidel" },
-  { artikel: "Rotwein", menge: 24, einheit: "Fl.", minimum: 12, preis: 6.5, lieferant: "Weinhaus Stein" },
-  { artikel: "Sahne", menge: 2, einheit: "L", minimum: 4, preis: 1.9, lieferant: "Molkerei Nord" },
+  { artikel: "Rindfleisch", menge: 8,  einheit: "kg",  minimum: 10, bestellmenge: 15, preis: 18.5, lieferantId: "L1", autoBestellung: true },
+  { artikel: "Kartoffeln",  menge: 45, einheit: "kg",  minimum: 20, bestellmenge: 50, preis: 0.8,  lieferantId: "L2", autoBestellung: false },
+  { artikel: "Olivenöl",    menge: 3,  einheit: "L",   minimum: 5,  bestellmenge: 10, preis: 8.9,  lieferantId: "L3", autoBestellung: true },
+  { artikel: "Mehl",        menge: 22, einheit: "kg",  minimum: 10, bestellmenge: 25, preis: 0.6,  lieferantId: "L4", autoBestellung: false },
+  { artikel: "Tomaten",     menge: 12, einheit: "kg",  minimum: 8,  bestellmenge: 20, preis: 2.1,  lieferantId: "L2", autoBestellung: true },
+  { artikel: "Lachs",       menge: 4,  einheit: "kg",  minimum: 6,  bestellmenge: 10, preis: 22.0, lieferantId: "L5", autoBestellung: true },
+  { artikel: "Rotwein",     menge: 24, einheit: "Fl.", minimum: 12, bestellmenge: 24, preis: 6.5,  lieferantId: "L6", autoBestellung: false },
+  { artikel: "Sahne",       menge: 2,  einheit: "L",   minimum: 4,  bestellmenge: 8,  preis: 1.9,  lieferantId: "L7", autoBestellung: true },
+];
+
+export const bestellhistorie = [
+  { id: "B001", artikel: "Rindfleisch", menge: 15, einheit: "kg", lieferant: "Metzger Hoffmann", datum: "28.04.2026", status: "geliefert", gesamt: 277.5, art: "auto" },
+  { id: "B002", artikel: "Lachs",       menge: 10, einheit: "kg", lieferant: "Fisch Seidel",     datum: "27.04.2026", status: "geliefert", gesamt: 220.0, art: "manuell" },
+  { id: "B003", artikel: "Sahne",       menge: 8,  einheit: "L",  lieferant: "Molkerei Nord",    datum: "29.04.2026", status: "unterwegs", gesamt: 15.2,  art: "auto" },
+  { id: "B004", artikel: "Olivenöl",    menge: 10, einheit: "L",  lieferant: "Feinkost Bauer",   datum: "30.04.2026", status: "bestellt",  gesamt: 89.0,  art: "auto" },
 ];
 
 export const steuerdaten = {

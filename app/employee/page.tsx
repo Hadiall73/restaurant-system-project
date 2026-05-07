@@ -3,18 +3,19 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useStore } from "@/lib/store";
 import { useRouter } from "next/navigation";
-import { Clock, Euro, Calendar, CheckCircle, LogOut, ChefHat, FileText, Download, ChevronLeft, ChevronRight } from "lucide-react";
+import { Clock, Euro, Calendar, CheckCircle, LogOut, ChefHat, FileText, Download, ChevronLeft, ChevronRight, MessageSquare } from "lucide-react";
+import Chat from "@/components/Chat";
 import toast from "react-hot-toast";
 import { Toaster } from "react-hot-toast";
 
 const DAYS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"];
 const DAY_KEYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 
-function getMonday() {
+function getMonday(offset = 0) {
   const d = new Date();
   const day = d.getDay();
   const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-  d.setDate(diff + 7); // next week
+  d.setDate(diff + offset * 7);
   return d;
 }
 
@@ -27,7 +28,7 @@ export default function EmployeePage() {
   const [totalEarned, setTotalEarned] = useState(0);
   const [availability, setAvailability] = useState<Record<string, boolean>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
-  const [tab, setTab] = useState<"dashboard" | "availability" | "schedule" | "abrechnung">("dashboard");
+  const [tab, setTab] = useState<"dashboard" | "availability" | "schedule" | "abrechnung" | "chat">("dashboard");
   const [abrMonth, setAbrMonth] = useState(new Date().toISOString().slice(0, 7));
   const [abrShifts, setAbrShifts] = useState<any[]>([]);
   const [inviteCode, setInviteCode] = useState("");
@@ -35,12 +36,21 @@ export default function EmployeePage() {
   const [hoursWorked, setHoursWorked] = useState(0);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (!data.session) { router.push("/auth"); return; }
-      if (!profile) {
-        supabase.from("profiles").select("*").eq("id", data.session.user.id).single()
-          .then(({ data: p }) => p && setProfile(p));
-      }
+    supabase.auth.getSession().then(async ({ data }) => {
+      if (!data.session) { router.replace("/auth"); return; }
+
+      const res  = await fetch("/api/auth/ensure-profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${data.session.access_token}` },
+        body: JSON.stringify({ user_id: data.session.user.id, email: data.session.user.email }),
+      });
+      const json = await res.json();
+      const p    = json.profile;
+
+      if (!p) { router.replace("/auth"); return; }
+      if (p.role === "chef")      { router.replace("/chef");      return; }
+      if (p.role === "developer") { router.replace("/developer"); return; }
+      setProfile(p);
     });
   }, []);
 
@@ -48,6 +58,46 @@ export default function EmployeePage() {
     if (!profile) return;
     loadEmployeeData();
   }, [profile, restaurant]);
+
+  // Echtzeit: Schichtänderungen vom Chef sofort anzeigen
+  useEffect(() => {
+    if (!profile || !restaurant) return;
+
+    const channel = supabase
+      .channel(`schedule-employee-${profile.id}`)
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "shifts",
+        filter: `user_id=eq.${profile.id}`,
+      }, (payload) => {
+        if (payload.eventType === "INSERT") {
+          const newShift = payload.new as any;
+          setMyShifts(prev => {
+            if (prev.find(s => s.id === newShift.id)) return prev;
+            return [newShift, ...prev].sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime());
+          });
+          toast.success("Neue Schicht wurde eingeplant!");
+        } else if (payload.eventType === "UPDATE") {
+          const updated = payload.new as any;
+          setMyShifts(prev => prev.map(s => s.id === updated.id ? { ...s, ...updated } : s));
+          if (!updated.actual_end && updated.actual_start === null) {
+            toast("Schicht wurde aktualisiert", { icon: "📅" });
+          }
+          if (updated.is_clocked_in === false && updated.actual_end) {
+            setCurrentShift(null);
+          }
+        } else if (payload.eventType === "DELETE") {
+          const deleted = payload.old as any;
+          setMyShifts(prev => prev.filter(s => s.id !== deleted.id));
+          if (currentShift?.id === deleted.id) setCurrentShift(null);
+          toast("Eine Schicht wurde entfernt", { icon: "🗑️" });
+        }
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [profile?.id, restaurant?.id]);
 
   useEffect(() => {
     if (!currentShift?.actual_start) return;
@@ -64,10 +114,11 @@ export default function EmployeePage() {
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
-    // Find restaurant if not set
+    // Find restaurant via API (Service-Role umgeht RLS-Probleme)
     if (!restaurant) {
-      const { data: member } = await supabase.from("restaurant_members").select("restaurant_id, restaurants(*)").eq("user_id", profile.id).eq("is_active", true).single();
-      if (member) setRestaurant((member as any).restaurants);
+      const res = await fetch(`/api/auth/get-restaurant?user_id=${profile.id}&role=employee`);
+      const json = await res.json();
+      if (json.restaurant) setRestaurant(json.restaurant);
       else return;
     }
 
@@ -119,7 +170,7 @@ export default function EmployeePage() {
 
   async function submitAvailability() {
     if (!profile || !restaurant) return;
-    const weekStart = getMonday().toISOString().slice(0, 10);
+    const weekStart = getMonday(1).toISOString().slice(0, 10);
     const payload: Record<string, any> = { restaurant_id: restaurant.id, user_id: profile.id, week_start: weekStart };
     DAY_KEYS.forEach(d => { payload[d] = !!availability[d]; payload[`${d}_note`] = notes[d] || null; });
     const { error } = await supabase.from("availability").upsert(payload, { onConflict: "restaurant_id,user_id,week_start" });
@@ -129,8 +180,10 @@ export default function EmployeePage() {
   async function loadAbrechnung(month: string) {
     if (!profile || !restaurant) return;
     const [y, m] = month.split("-").map(Number);
-    const start = new Date(y, m - 1, 1).toISOString();
-    const end = new Date(y, m, 0, 23, 59, 59).toISOString();
+    // Lokale Datumsgrenzen ohne UTC-Verschiebung
+    const lastDay = new Date(y, m, 0).getDate();
+    const start = `${month}-01T00:00:00`;
+    const end = `${month}-${String(lastDay).padStart(2, "0")}T23:59:59`;
     const { data } = await supabase
       .from("shifts")
       .select("*")
@@ -148,12 +201,14 @@ export default function EmployeePage() {
 
   function changeMonth(dir: 1 | -1) {
     const [y, m] = abrMonth.split("-").map(Number);
-    const d = new Date(y, m - 1 + dir, 1);
-    setAbrMonth(d.toISOString().slice(0, 7));
+    let newY = y, newM = m + dir;
+    if (newM > 12) { newM = 1; newY++; }
+    if (newM < 1) { newM = 12; newY--; }
+    setAbrMonth(`${newY}-${String(newM).padStart(2, "0")}`);
   }
 
   async function exportAbrechnungPDF() {
-    const { default: jsPDF } = await import("jspdf");
+    const { jsPDF } = await import("jspdf");
     const [y, m] = abrMonth.split("-").map(Number);
     const monthName = new Date(y, m - 1, 1).toLocaleDateString("de-DE", { month: "long", year: "numeric" });
     const completed = abrShifts.filter(s => s.actual_end);
@@ -352,7 +407,7 @@ export default function EmployeePage() {
   async function logout() {
     await supabase.auth.signOut();
     clear();
-    router.push("/auth");
+    router.replace("/auth");
   }
 
   if (!restaurant) return (
@@ -408,7 +463,7 @@ export default function EmployeePage() {
 
       {/* Tabs */}
       <div className="flex gap-2 px-4 mt-4 overflow-x-auto pb-1">
-        {([["dashboard", "Übersicht"], ["schedule", "Dienstplan"], ["availability", "Verfügbarkeit"], ["abrechnung", "Abrechnung"]] as const).map(([k, l]) => (
+        {([["dashboard", "Übersicht"], ["schedule", "Dienstplan"], ["availability", "Verfügbarkeit"], ["abrechnung", "Abrechnung"], ["chat", "💬 Chat"]] as const).map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)}
             className={`flex-shrink-0 flex-1 py-2.5 rounded-xl text-sm font-medium transition-all ${tab === k ? "bg-orange-500 text-white" : "bg-gray-800 text-gray-400"}`}>{l}</button>
         ))}
@@ -436,7 +491,7 @@ export default function EmployeePage() {
                     <div key={s.id} className="flex items-center justify-between py-2 border-b border-gray-800/50 last:border-0">
                       <div>
                         <p className="text-white text-sm">{new Date(s.start_time).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "short" })}</p>
-                        <p className="text-gray-400 text-xs">{new Date(s.start_time).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })} – {new Date(s.end_time).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}</p>
+                        <p className="text-gray-400 text-xs">{new Date(s.start_time).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })} – {s.end_time ? new Date(s.end_time).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) : "—"}</p>
                       </div>
                       <div className="text-right">
                         {h ? <><p className="text-white text-sm font-medium">{h.toFixed(1)}h</p><p className="text-green-400 text-xs">{(h * Number(s.hourly_wage || 13)).toFixed(2)} €</p></> : <span className="text-orange-400 text-xs">Geplant</span>}
@@ -460,9 +515,9 @@ export default function EmployeePage() {
                   </div>
                   <div className="flex-1">
                     <p className="text-white text-sm font-medium">{new Date(s.start_time).toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" })}</p>
-                    <p className="text-gray-400 text-xs">{new Date(s.start_time).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })} – {new Date(s.end_time).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}</p>
+                    <p className="text-gray-400 text-xs">{new Date(s.start_time).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })} – {s.end_time ? new Date(s.end_time).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) : "—"}</p>
                   </div>
-                  <span className="text-orange-400 text-xs font-medium">{((new Date(s.end_time).getTime() - new Date(s.start_time).getTime()) / 3600000).toFixed(1)}h</span>
+                  <span className="text-orange-400 text-xs font-medium">{s.end_time ? ((new Date(s.end_time).getTime() - new Date(s.start_time).getTime()) / 3600000).toFixed(1) + "h" : "—"}</span>
                 </div>
               ))}
               {myShifts.filter(s => new Date(s.start_time) >= new Date()).length === 0 && <p className="text-gray-500 text-sm text-center py-4">Keine geplanten Schichten</p>}
@@ -494,7 +549,7 @@ export default function EmployeePage() {
                   <p className="text-white font-bold text-lg">{monthName}</p>
                   <p className="text-gray-400 text-xs">Monatliche Lohnabrechnung</p>
                 </div>
-                <button onClick={() => changeMonth(1)} disabled={abrMonth >= new Date().toISOString().slice(0, 7)}
+                <button onClick={() => changeMonth(1)} disabled={abrMonth >= (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}`; })()}
                   className="p-2 rounded-xl bg-gray-800 hover:bg-gray-700 text-white transition-colors disabled:opacity-30">
                   <ChevronRight size={16} />
                 </button>
@@ -515,19 +570,20 @@ export default function EmployeePage() {
                 ))}
               </div>
 
+              {/* PDF-Download Button */}
+              {completed.length > 0 && (
+                <button onClick={exportAbrechnungPDF}
+                  className="w-full flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white py-3.5 rounded-2xl font-semibold text-sm transition-colors shadow-lg shadow-orange-500/20">
+                  <Download size={18} />
+                  Lohnabrechnung {monthName} als PDF herunterladen
+                </button>
+              )}
+
               {/* Schichten-Tabelle */}
               <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
-                <div className="p-4 border-b border-gray-800 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <FileText size={16} className="text-orange-400" />
-                    <h3 className="font-semibold text-white">Abgeleistete Schichten</h3>
-                  </div>
-                  {completed.length > 0 && (
-                    <button onClick={exportAbrechnungPDF}
-                      className="flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white px-3 py-1.5 rounded-xl text-xs font-medium transition-colors">
-                      <Download size={12} /> PDF
-                    </button>
-                  )}
+                <div className="p-4 border-b border-gray-800 flex items-center gap-2">
+                  <FileText size={16} className="text-orange-400" />
+                  <h3 className="font-semibold text-white">Abgeleistete Schichten</h3>
                 </div>
 
                 {completed.length === 0 ? (
@@ -614,33 +670,58 @@ export default function EmployeePage() {
           );
         })()}
 
-        {tab === "availability" && (
-          <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
-            <h3 className="font-semibold text-white mb-1">Verfügbarkeit – nächste Woche</h3>
-            <p className="text-gray-400 text-xs mb-4">{getMonday().toLocaleDateString("de-DE", { day: "numeric", month: "long" })} – reiche bis Donnerstag ein</p>
-            <div className="space-y-3">
-              {DAYS.map((day, i) => (
-                <div key={day}>
-                  <div className="flex items-center justify-between">
-                    <span className="text-white text-sm font-medium">{day}</span>
-                    <button onClick={() => setAvailability(prev => ({ ...prev, [DAY_KEYS[i]]: !prev[DAY_KEYS[i]] }))}
-                      className={`w-12 h-6 rounded-full transition-colors relative ${availability[DAY_KEYS[i]] ? "bg-green-500" : "bg-gray-700"}`}>
-                      <div className={`w-5 h-5 rounded-full bg-white absolute top-0.5 transition-all ${availability[DAY_KEYS[i]] ? "right-0.5" : "left-0.5"}`} />
-                    </button>
-                  </div>
-                  {availability[DAY_KEYS[i]] && (
-                    <input value={notes[DAY_KEYS[i]] || ""} onChange={e => setNotes(prev => ({ ...prev, [DAY_KEYS[i]]: e.target.value }))}
-                      placeholder="Anmerkung (optional)"
-                      className="w-full mt-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-orange-500" />
-                  )}
-                </div>
-              ))}
+        {tab === "chat" && <Chat isChef={false} />}
+
+        {tab === "availability" && (() => {
+          const SLOTS = ["Vormittag", "Mittag", "Abend"];
+          function getSlots(dayKey: string): string[] {
+            return notes[dayKey] ? notes[dayKey].split(",").filter(Boolean) : [];
+          }
+          function toggleSlot(dayKey: string, slot: string) {
+            const current = getSlots(dayKey);
+            const next = current.includes(slot) ? current.filter(s => s !== slot) : [...current, slot];
+            setNotes(prev => ({ ...prev, [dayKey]: next.join(",") }));
+            setAvailability(prev => ({ ...prev, [dayKey]: next.length > 0 }));
+          }
+          return (
+            <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+              <h3 className="font-semibold text-white mb-1">Verfügbarkeit – nächste Woche</h3>
+              <p className="text-gray-400 text-xs mb-4">{getMonday(1).toLocaleDateString("de-DE", { day: "numeric", month: "long" })} – reiche bis Donnerstag ein</p>
+              <div className="space-y-4">
+                {DAYS.map((day, i) => {
+                  const dk = DAY_KEYS[i];
+                  const selected = getSlots(dk);
+                  const isAvail = selected.length > 0;
+                  return (
+                    <div key={day} className={`rounded-xl p-3 border transition-colors ${isAvail ? "border-green-500/30 bg-green-500/5" : "border-gray-800 bg-gray-800/30"}`}>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className={`text-sm font-semibold ${isAvail ? "text-white" : "text-gray-400"}`}>{day}</span>
+                        {isAvail
+                          ? <span className="text-xs text-green-400 font-medium">Verfügbar</span>
+                          : <span className="text-xs text-gray-600">Nicht verfügbar</span>}
+                      </div>
+                      <div className="flex gap-2">
+                        {SLOTS.map(slot => {
+                          const active = selected.includes(slot);
+                          return (
+                            <button key={slot} onClick={() => toggleSlot(dk, slot)}
+                              className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${active ? "bg-orange-500 text-white" : "bg-gray-700 text-gray-400 hover:bg-gray-600"}`}>
+                              {slot}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-gray-500 text-xs mt-3 mb-4">Tippe auf einen Zeitraum um ihn auszuwählen. Mehrere Zeiten pro Tag sind möglich.</p>
+              <button onClick={submitAvailability} className="w-full bg-orange-500 hover:bg-orange-600 text-white py-3 rounded-xl font-medium transition-colors flex items-center justify-center gap-2">
+                <CheckCircle size={16} /> Verfügbarkeit einreichen
+              </button>
             </div>
-            <button onClick={submitAvailability} className="w-full bg-orange-500 hover:bg-orange-600 text-white py-3 rounded-xl font-medium mt-4 transition-colors flex items-center justify-center gap-2">
-              <CheckCircle size={16} /> Verfügbarkeit einreichen
-            </button>
-          </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );

@@ -6,29 +6,29 @@ function getAdmin() {
   return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 }
 
-function generateKey(plan: string) {
-  const prefix = plan === "enterprise" ? "ENT" : plan === "pro" ? "PRO" : "BSC";
-  const random = randomBytes(4).toString("hex").toUpperCase();
-  const random2 = randomBytes(4).toString("hex").toUpperCase();
-  return `RESTO-${prefix}-${random}-${random2}`;
+function generateKey() {
+  const a = randomBytes(4).toString("hex").toUpperCase();
+  const b = randomBytes(4).toString("hex").toUpperCase();
+  const c = randomBytes(4).toString("hex").toUpperCase();
+  return `RESTO-${a}-${b}-${c}`;
 }
 
 // POST /api/keys — create a new license key (developer only)
 export async function POST(req: NextRequest) {
-  const { plan = "basic", max_employees = 10, notes, expires_days, developer_email } = await req.json();
+  const { notes, expires_days, developer_email } = await req.json();
 
   if (developer_email !== process.env.DEVELOPER_EMAIL) {
     return NextResponse.json({ error: "Nicht autorisiert" }, { status: 403 });
   }
 
   const supabaseAdmin = getAdmin();
-  const key = generateKey(plan);
+  const key        = generateKey();
   const expires_at = expires_days
     ? new Date(Date.now() + expires_days * 86400000).toISOString()
     : null;
 
   const { data, error } = await supabaseAdmin.from("license_keys").insert({
-    key, plan, max_employees, notes, expires_at,
+    key, notes, expires_at,
   }).select().single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

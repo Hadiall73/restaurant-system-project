@@ -64,6 +64,7 @@ CREATE TABLE restaurant_members (
   role TEXT NOT NULL DEFAULT 'employee', -- chef, manager, employee
   hourly_wage DECIMAL(10,2) DEFAULT 13.00,
   position TEXT, -- Koch, Kellner, Barkeeper etc.
+  soll_stunden_woche INT DEFAULT 40, -- Soll-Stunden pro Woche
   joined_at TIMESTAMPTZ DEFAULT NOW(),
   is_active BOOLEAN DEFAULT true,
   UNIQUE(restaurant_id, user_id)
@@ -189,19 +190,77 @@ CREATE TABLE bookkeeping_entries (
 );
 
 -- ─────────────────────────────────────────────
+-- SUPPLIERS (Lieferanten)
+-- ─────────────────────────────────────────────
+CREATE TABLE suppliers (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  restaurant_id UUID REFERENCES restaurants(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  contact_person TEXT,
+  phone TEXT,
+  email TEXT,
+  category TEXT, -- Fleisch, Gemüse, Getränke etc.
+  delivery_time TEXT DEFAULT '1 Tag',
+  min_order_value DECIMAL(10,2) DEFAULT 0,
+  payment_days INT DEFAULT 14,
+  notes TEXT,
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ─────────────────────────────────────────────
 -- INVENTORY (Lagerbestand)
 -- ─────────────────────────────────────────────
 CREATE TABLE inventory (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   restaurant_id UUID REFERENCES restaurants(id) ON DELETE CASCADE,
+  supplier_id UUID REFERENCES suppliers(id),
   name TEXT NOT NULL,
   unit TEXT DEFAULT 'kg',
   current_quantity DECIMAL(10,3) DEFAULT 0,
   minimum_quantity DECIMAL(10,3) DEFAULT 0,
+  order_quantity DECIMAL(10,3) DEFAULT 0, -- Bestellmenge wenn nachbestellt wird
   price_per_unit DECIMAL(10,2),
-  supplier TEXT,
+  auto_order BOOLEAN DEFAULT false, -- Automatisch bestellen wenn unter Minimum
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- ─────────────────────────────────────────────
+-- ORDERS (Bestellhistorie)
+-- ─────────────────────────────────────────────
+CREATE TABLE supplier_orders (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  restaurant_id UUID REFERENCES restaurants(id) ON DELETE CASCADE,
+  supplier_id UUID REFERENCES suppliers(id),
+  inventory_id UUID REFERENCES inventory(id),
+  article_name TEXT NOT NULL,
+  quantity DECIMAL(10,3) NOT NULL,
+  unit TEXT,
+  total_price DECIMAL(10,2),
+  order_type TEXT DEFAULT 'manual', -- manual, auto
+  status TEXT DEFAULT 'bestellt', -- bestellt, unterwegs, geliefert
+  ordered_at TIMESTAMPTZ DEFAULT NOW(),
+  delivered_at TIMESTAMPTZ,
+  notes TEXT
+);
+
+-- ─────────────────────────────────────────────
+-- MESSAGES (Team Chat)
+-- ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS messages (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  restaurant_id UUID REFERENCES restaurants(id) ON DELETE CASCADE NOT NULL,
+  sender_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  content TEXT,
+  type TEXT NOT NULL DEFAULT 'text', -- text, image, video, audio, file
+  file_url TEXT,
+  file_name TEXT,
+  file_size BIGINT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE messages REPLICA IDENTITY FULL;
 
 -- ─────────────────────────────────────────────
 -- REALTIME ENABLE
@@ -224,6 +283,8 @@ ALTER TABLE bookkeeping_entries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE menu_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE dish_orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inventory ENABLE ROW LEVEL SECURITY;
+ALTER TABLE suppliers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE supplier_orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE license_keys ENABLE ROW LEVEL SECURITY;
 
 -- Profiles: users see own profile
@@ -293,9 +354,21 @@ CREATE POLICY "Members see inventory" ON inventory FOR SELECT
 CREATE POLICY "Chef manages inventory" ON inventory FOR ALL
   USING (restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = auth.uid()));
 
--- License keys: developer only (managed via service role)
-CREATE POLICY "Only authenticated see own license" ON license_keys FOR SELECT
-  USING (true);
+-- Suppliers
+CREATE POLICY "Members see suppliers" ON suppliers FOR SELECT
+  USING (restaurant_id IN (SELECT restaurant_id FROM restaurant_members WHERE user_id = auth.uid()));
+CREATE POLICY "Chef manages suppliers" ON suppliers FOR ALL
+  USING (restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = auth.uid()));
+
+-- Supplier orders
+CREATE POLICY "Members see supplier orders" ON supplier_orders FOR SELECT
+  USING (restaurant_id IN (SELECT restaurant_id FROM restaurant_members WHERE user_id = auth.uid()));
+CREATE POLICY "Chef manages supplier orders" ON supplier_orders FOR ALL
+  USING (restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = auth.uid()));
+
+-- License keys: only the restaurant owner can see their own license key
+CREATE POLICY "Owner sees own license" ON license_keys FOR SELECT
+  USING (restaurant_id IN (SELECT id FROM restaurants WHERE owner_id = auth.uid()));
 
 -- ─────────────────────────────────────────────
 -- AUTO-BOOKKEEPING TRIGGER
