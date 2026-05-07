@@ -11,7 +11,6 @@ function safeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respon
       ? Array.from(init.headers.entries())
       : Object.entries(init.headers as Record<string, string>);
     for (const [k, v] of entries) {
-      // Remove BOM (0xFEFF) and any other non-ISO-8859-1 characters
       let cleaned = v;
       if (cleaned.charCodeAt(0) === 0xFEFF) cleaned = cleaned.slice(1);
       clean[k] = cleaned.replace(/[^\x00-\xFF]/g, "");
@@ -25,6 +24,86 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   realtime: { params: { eventsPerSecond: 10 } },
   global: { fetch: safeFetch },
 });
+
+/**
+ * ROBUST SYNC UTILITY (Restaurant System)
+ * Implements a local-first sync strategy for complex restaurant data.
+ */
+export const RobustSync = {
+  STORAGE_PREFIX: 'rs_sync_',
+
+  // Generic method to save data locally when offline
+  async saveLocally(table: string, data: any) {
+    const key = `${this.STORAGE_PREFIX}${table}`;
+    const existing = this.getLocalData(table);
+    
+    // We store a timestamp to implement Last-Write-Wins
+    const entry = {
+      ...data,
+      _sync_timestamp: new Date().toISOString(),
+      _synced: false
+    };
+
+    existing.push(entry);
+    localStorage.setItem(key, JSON.stringify(existing));
+    console.log(`[RobustSync] Saved ${table} entry locally.`);
+  },
+
+  getLocalData(table: string) {
+    const data = localStorage.getItem(`${this.STORAGE_PREFIX}${table}`);
+    return data ? JSON.parse(data) : [];
+  },
+
+  // Sync specific table to Supabase
+  async syncTable(table: string, supabaseTable: string) {
+    if (!navigator.onLine) return;
+
+    const queue = this.getLocalData(table);
+    if (queue.length === 0) return;
+
+    console.log(`[RobustSync] Syncing ${queue.length} items for ${table}...`);
+
+    const results = await Promise.all(
+      queue.map(async (item) => {
+        try {
+          const { data, error } = await supabase
+            .from(supabaseTable)
+            .upsert(item, { onConflict: 'id' });
+          
+          if (error) throw error;
+          return { id: item.id, success: true };
+        } catch (e) {
+          return { id: item.id, success: false, error: e };
+        }
+      })
+    );
+
+    const remaining = queue.filter((_, index) => !results[index].success);
+    localStorage.setItem(`${this.STORAGE_PREFIX}${table}`, JSON.stringify(remaining));
+    console.log(`[RobustSync] ${table} sync complete. ${queue.length - remaining.length} updated.`);
+  },
+
+  // Global sync for all restaurant modules
+  async syncAll() {
+    const modules = [
+      { local: 'sales', remote: 'sales' },
+      { local: 'shifts', remote: 'shifts' },
+      { local: 'expenses', remote: 'expenses' },
+      { local: 'menu', remote: 'menu_items' },
+      { local: 'inventory', remote: 'inventory' },
+    ];
+
+    for (const mod of modules) {
+      await this.syncTable(mod.local, mod.remote);
+    }
+  },
+
+  init() {
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', () => this.syncAll());
+    }
+  }
+};
 
 export type UserRole = "developer" | "chef" | "employee";
 
@@ -120,6 +199,7 @@ export interface Availability {
   friday_note?: string;
   saturday_note?: string;
   sunday_note?: string;
+  submitted_at: string;
 }
 
 export interface Expense {
@@ -133,6 +213,9 @@ export interface Expense {
   supplier?: string;
   description?: string;
   invoice_date?: string;
+  receipt_url?: string;
+  recorded_by?: string;
+  recorded_at: string;
 }
 
 export interface BookkeepingEntry {
