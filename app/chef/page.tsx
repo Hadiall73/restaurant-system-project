@@ -20,6 +20,7 @@ import UmsatzImport from "@/components/chef/UmsatzImport";
 import PosConnect from "@/components/chef/PosConnect";
 import Support from "@/components/chef/Support";
 import Abo from "@/components/chef/Abo";
+import ExpenseManager from "@/components/ExpenseManager";
 
 const NAV = [
   { id: "dashboard",      label: "Übersicht",       icon: LayoutDashboard },
@@ -28,6 +29,7 @@ const NAV = [
   { id: "team",           label: "Team",            icon: Users },
   { id: "chat",           label: "Team Chat",       icon: MessageSquare },
   { id: "bookkeeping",    label: "Buchhaltung",     icon: TrendingUp },
+  { id: "expenses",        label: "Ausgaben",         icon: TrendingDown },
   { id: "rechnungen",     label: "Rechnungen",      icon: Key },
   { id: "lager",          label: "Lager",           icon: Settings },
   { id: "steuer",         label: "Steuer",          icon: Settings },
@@ -106,6 +108,7 @@ export default function ChefPage() {
     team:           <TeamManager />,
     chat:           <Chat isChef={true} />,
     bookkeeping:    <Bookkeeping />,
+    expenses:          <ExpenseManager />,
     rechnungen:     <Rechnungen />,
     lager:          <Lager />,
     steuer:         <Steuer />,
